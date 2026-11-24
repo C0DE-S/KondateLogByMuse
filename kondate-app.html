@@ -90,6 +90,10 @@
       }
       .suggest button + button{border-top:1px solid var(--line);}
       .suggest button:active{background:var(--accent-soft);}
+      /* 料理名サジェスト：absoluteで被せず、料理ブロック（親）の中に通常フローで表示する */
+      .dish-name-wrap{min-width:0;}
+      .suggest.dish-suggest{position:static;margin-top:4px;max-height:240px;}
+      .suggest.dish-suggest button{min-height:48px;padding:12px;display:flex;align-items:center;}
       .seg{display:flex;background:var(--chip);border-radius:10px;padding:3px;gap:2px;}
       .seg button{
         flex:1;border:1px solid transparent;background:transparent;font-family:inherit;font-size:14px;
@@ -1358,11 +1362,61 @@
       head.appendChild(seg); head.appendChild(del);
       block.appendChild(head);
 
+      var nameWrap = document.createElement('div');
+      nameWrap.className = 'dish-name-wrap';
       var name = document.createElement('input');
       name.type = 'text'; name.className = 'dish-name'; name.placeholder = '料理名';
-      name.setAttribute('list','dish-names');
+      name.setAttribute('autocomplete','off');
       name.value = d.name || '';
-      name.addEventListener('input', function(){ d.name = name.value; tryInherit(); });
+      var dishSuggest = document.createElement('div');
+      dishSuggest.className = 'suggest dish-suggest';
+      dishSuggest.hidden = true;
+      nameWrap.appendChild(name);
+      nameWrap.appendChild(dishSuggest);
+      /* 検索と同じ正規化：カタカナ→ひらがな・小文字化（かな同士の揺れのみ吸収） */
+      function dishNameNorm(s){
+        return String(s == null ? '' : s).toLowerCase().replace(/[ァ-ヶ]/g, function(c){
+          return String.fromCharCode(c.charCodeAt(0) - 0x60);
+        });
+      }
+      function hideDishSuggest(){ dishSuggest.hidden = true; }
+      function showDishSuggest(){
+        var q = dishNameNorm(name.value).trim();
+        if(!q){ hideDishSuggest(); return; }
+        var tokens = q.split(/[\s　]+/).filter(function(t){ return t; });
+        if(!tokens.length){ hideDishSuggest(); return; }
+        /* 重複なし・最近作った順（sortedEntriesは新しい順） */
+        var seen = {}, names = [];
+        sortedEntries().forEach(function(e){
+          e.dishes.forEach(function(dd){
+            var n = (dd.name || '').trim();
+            if(n && !seen[n]){ seen[n] = 1; names.push(n); }
+          });
+        });
+        var hits = names.filter(function(n){
+          var hay = dishNameNorm(n);
+          return tokens.every(function(t){ return hay.indexOf(t) >= 0; });
+        });
+        dishSuggest.innerHTML = '';
+        if(!hits.length){ hideDishSuggest(); return; }
+        hits.forEach(function(n){
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = n;
+          b.addEventListener('mousedown', function(ev){
+            ev.preventDefault();
+            name.value = n;
+            d.name = n;
+            hideDishSuggest();
+            tryInherit();
+          });
+          dishSuggest.appendChild(b);
+        });
+        dishSuggest.hidden = false;
+      }
+      name.addEventListener('input', function(){ d.name = name.value; showDishSuggest(); tryInherit(); });
+      name.addEventListener('focus', showDishSuggest);
+      name.addEventListener('blur', function(){ setTimeout(hideDishSuggest, 150); });
       name.addEventListener('change', function(){ tryInherit(); });
       function tryInherit(){
         var key = name.value.trim();
@@ -1384,7 +1438,7 @@
           renderThumbs(block);
         }
       }
-      block.appendChild(name);
+      block.appendChild(nameWrap);
 
       var lp = document.createElement('div'); lp.className = 'chips-label'; lp.textContent = 'タンパク質';
       block.appendChild(lp);
