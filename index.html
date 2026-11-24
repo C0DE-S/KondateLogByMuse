@@ -173,7 +173,8 @@
       .entry-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0;}
       .entry-date{font-weight:700;font-size:15px;}
       .entry-meta{font-size:12px;color:var(--sub);}
-      .entry-del{margin-left:auto;border:0;background:transparent;color:var(--sub);font-size:12px;cursor:pointer;font-family:inherit;padding:4px;}
+      .entry-del{margin-left:auto;border:1px solid var(--line);background:transparent;color:var(--danger);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;padding:4px 9px;border-radius:999px;display:inline-flex;align-items:center;gap:4px;line-height:1.3;flex:0 0 auto;}
+      .entry-del svg{width:14px;height:14px;display:block;flex:0 0 auto;}
       .dishline{margin-top:10px;min-width:0;}
       .dishline .dname{font-weight:700;}
       .kindtag{
@@ -491,6 +492,21 @@
       .hist-day-card .meal-date{margin-top:0;}
       .meal-block{padding:6px 0 10px;border-bottom:1px solid var(--line);}
       .meal-block:last-child{border-bottom:0;}
+      .hist-confirm{
+        display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 4px;
+        background:var(--accent-soft);border-radius:10px;padding:8px 10px;font-size:12px;min-width:0;
+      }
+      .hist-confirm .hc-msg{flex:1 1 140px;min-width:0;font-weight:700;}
+      .hist-confirm .hc-actions{display:inline-flex;gap:6px;flex:0 0 auto;}
+      .hist-confirm button{
+        flex:0 0 auto;border:0;font-family:inherit;font-size:12px;font-weight:700;
+        padding:6px 10px;border-radius:8px;cursor:pointer;
+      }
+      .hist-confirm .hc-yes{background:var(--danger);color:#fff;}
+      .hist-confirm .hc-no{background:var(--card);color:var(--sub);border:1px solid var(--line);}
+      .detail-photo-add{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;}
+      .detail-photo-add .photobtn{margin-top:10px;}
+      .detail-photo-add .upload-status{margin-top:10px;}
       .meal-head{display:flex;align-items:baseline;gap:8px;}
       .meal-kind{font-size:13px;font-weight:700;}
       .rec-label{font-size:13px;font-weight:800;margin:14px 0 6px;}
@@ -1409,6 +1425,41 @@
         sbtns[j].setAttribute('aria-pressed', sbtns[j].getAttribute('data-value') === d.seasoning ? 'true' : 'false');
       }
     }
+    /* Cloudinaryへの写真アップロード（進捗表示付き）。登録フォームと料理詳細で共用する */
+    function uploadToCloudinary(fileObj, status, onSuccess){
+      if(status){
+        status.hidden = false;
+        status.textContent = '写真をアップロード中… 0%';
+      }
+      var fd = new FormData();
+      fd.append('file', fileObj);
+      fd.append('upload_preset', 'kondate_unsigned');
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://api.cloudinary.com/v1_1/fsmmc0ym/image/upload');
+      xhr.upload.addEventListener('progress', function(ev){
+        if(ev.lengthComputable && status) status.textContent = '写真をアップロード中… ' + Math.round(ev.loaded / ev.total * 100) + '%';
+      });
+      xhr.addEventListener('load', function(){
+        var url = '';
+        try{
+          var res = JSON.parse(xhr.responseText);
+          if(xhr.status >= 200 && xhr.status < 300 && res.secure_url) url = res.secure_url;
+        }catch(e){}
+        if(url){
+          if(status){
+            status.textContent = '写真を追加したよ';
+            setTimeout(function(){ status.hidden = true; }, 1600);
+          }
+          onSuccess(url);
+        }else if(status){
+          status.textContent = 'アップロードに失敗したよ。もう一度試してね';
+        }
+      });
+      xhr.addEventListener('error', function(){
+        if(status) status.textContent = 'アップロードに失敗したよ。通信環境を確認してね';
+      });
+      xhr.send(fd);
+    }
     function addPhoto(block, fileObj){
       var status = block.querySelector('.upload-status');
       if(!status){
@@ -1417,38 +1468,11 @@
         var pb = block.querySelector('.photobtn');
         if(pb) block.insertBefore(status, pb); else block.appendChild(status);
       }
-      status.hidden = false;
-      status.textContent = '写真をアップロード中… 0%';
-      var fd = new FormData();
-      fd.append('file', fileObj);
-      fd.append('upload_preset', 'kondate_unsigned');
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', 'https://api.cloudinary.com/v1_1/fsmmc0ym/image/upload');
-      xhr.upload.addEventListener('progress', function(ev){
-        if(ev.lengthComputable) status.textContent = '写真をアップロード中… ' + Math.round(ev.loaded / ev.total * 100) + '%';
+      uploadToCloudinary(fileObj, status, function(url){
+        block._dish.images.push(img(url, 'own'));
+        sortImages(block._dish);
+        renderThumbs(block);
       });
-      xhr.addEventListener('load', function(){
-        var ok = false;
-        try{
-          var res = JSON.parse(xhr.responseText);
-          if(xhr.status >= 200 && xhr.status < 300 && res.secure_url){
-            block._dish.images.push(img(res.secure_url, 'own'));
-            sortImages(block._dish);
-            renderThumbs(block);
-            ok = true;
-          }
-        }catch(e){}
-        if(ok){
-          status.textContent = '写真を追加したよ';
-          setTimeout(function(){ status.hidden = true; }, 1600);
-        }else{
-          status.textContent = 'アップロードに失敗したよ。もう一度試してね';
-        }
-      });
-      xhr.addEventListener('error', function(){
-        status.textContent = 'アップロードに失敗したよ。通信環境を確認してね';
-      });
-      xhr.send(fd);
     }
 
     function resetForm(){
@@ -2195,6 +2219,30 @@
       document.getElementById('search-screen').hidden = true;
       syncFab();
     }
+    function trashIconHTML(){
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
+    }
+    function refreshDetailCarousel(){
+      var box = document.getElementById('detail-carousel');
+      if(!box || !detailName) return;
+      var info = recipeDetailInfo(detailName);
+      box.innerHTML = carouselHTML(info.images);
+      bindCarousels(box);
+    }
+    /* 詳細画面から後から写真を追加：直近の記録の料理に自分の写真として保存する */
+    function addDetailPhoto(fileObj){
+      var status = document.getElementById('detail-upload-status');
+      uploadToCloudinary(fileObj, status, function(url){
+        if(!detailName) return;
+        var target = recipeDetailInfo(detailName).latest;
+        if(!target) return;
+        target.images.push(img(url, 'own'));
+        sortImages(target);
+        persist();
+        renderAll();
+        refreshDetailCarousel();
+      });
+    }
     function openDetail(name){
       detailName = name;
       var info = recipeDetailInfo(name);
@@ -2240,24 +2288,50 @@
           return '<div class="meal-block"><div class="meal-head">' +
             '<span class="meal-kind">' + esc(e.meal) + '食</span>' +
             (e.cook ? '<span class="hist-meta">作：' + esc(e.cook) + '</span>' : '') +
-            '<button type="button" class="entry-del" data-del-entry="' + esc(e.id) + '">削除</button></div>' +
+            '<button type="button" class="entry-del" data-del-entry="' + esc(e.id) + '" data-del-date="' + esc(e.date) + '" data-del-meal="' + esc(e.meal) + '" aria-label="' + esc(jpDate(e.date)) + 'の' + esc(e.meal) + '食の記録を削除">' + trashIconHTML() + '<span>削除</span></button></div>' +
             e.dishes.map(dishLineHTML).join('') + '</div>';
         }).join('');
         return '<div class="hist-day-card"><div class="meal-date">' + esc(jpDate(g.date)) + (when ? ' <span class="hist-meta">' + esc(when) + '</span>' : '') + '</div>' + body + '</div>';
       }).join('');
       document.getElementById('detail-body').innerHTML =
-        carouselHTML(info.images) +
+        '<div id="detail-carousel">' + carouselHTML(info.images) + '</div>' +
+        '<div class="detail-photo-add"><label class="photobtn">＋ 写真を追加<input type="file" id="detail-photo-input" accept="image/*" multiple style="display:none"></label>' +
+        '<div class="upload-status" id="detail-upload-status" hidden></div></div>' +
         '<div class="detail-meta">' + statsLine + (inP ? ' ・ 今日作るものに入ってるよ' : '') + link + '</div>' +
         chips +
         '<div class="detail-sec">献立履歴</div>' +
         (histHTML || '<div class="empty">まだ記録がないよ</div>');
       bindCarousels(document.getElementById('detail-body'));
+      var detailPhotoInput = document.getElementById('detail-photo-input');
+      if(detailPhotoInput){
+        detailPhotoInput.addEventListener('change', function(){
+          Array.prototype.forEach.call(detailPhotoInput.files, function(f){ addDetailPhoto(f); });
+          detailPhotoInput.value = '';
+        });
+      }
       document.getElementById('detail-body').querySelectorAll('[data-del-entry]').forEach(function(btn){
         btn.addEventListener('click', function(){
-          entries = entries.filter(function(e){ return e.id !== btn.getAttribute('data-del-entry'); });
-          persist(); refreshDatalist(); renderAll();
-          if(recipeDetailInfo(name).count > 0){ openDetail(name); }else{ closeDetail(); }
-          showToast('記録を削除したよ');
+          var block = btn.closest ? btn.closest('.meal-block') : null;
+          if(!block) block = btn.parentElement;
+          if(!block || block.querySelector('.hist-confirm')) return;
+          var entryId = btn.getAttribute('data-del-entry');
+          var dateStr = btn.getAttribute('data-del-date') || '';
+          var mealStr = btn.getAttribute('data-del-meal') || '';
+          var conf = document.createElement('div');
+          conf.className = 'hist-confirm';
+          conf.innerHTML = '<span class="hc-msg">' + esc(jpDate(dateStr)) + 'の' + esc(mealStr) + '食の記録を削除しますか？</span>' +
+            '<span class="hc-actions"><button type="button" class="hc-yes">削除する</button>' +
+            '<button type="button" class="hc-no">キャンセル</button></span>';
+          block.appendChild(conf);
+          conf.querySelector('.hc-no').addEventListener('click', function(){
+            conf.remove();
+          });
+          conf.querySelector('.hc-yes').addEventListener('click', function(){
+            entries = entries.filter(function(e){ return e.id !== entryId; });
+            persist(); refreshDatalist(); renderAll();
+            if(recipeDetailInfo(name).count > 0){ openDetail(name); }else{ closeDetail(); }
+            showToast('記録を削除したよ');
+          });
         });
       });
       document.getElementById('detail').hidden = false;
