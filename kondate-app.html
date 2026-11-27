@@ -389,6 +389,19 @@
       }
       .sheet-new[hidden]{display:none !important;}
       .sheet-cancel:active,.sheet-new:active{opacity:.85;}
+      /* ---------- 料理の編集（詳細画面） ---------- */
+      .detail-edit-row{display:flex;justify-content:flex-end;margin-top:12px;min-width:0;}
+      .detail-edit-btn{
+        border:1px solid var(--line);background:var(--card);color:var(--accent);
+        font-family:inherit;font-size:13px;font-weight:700;padding:7px 18px;border-radius:999px;
+        cursor:pointer;box-shadow:var(--shadow);
+      }
+      .edit-save{
+        flex:1;min-width:0;border:0;background:var(--accent);color:#FFF7EE;font-family:inherit;
+        font-size:15px;font-weight:700;padding:13px;border-radius:10px;cursor:pointer;
+      }
+      .edit-save.is-pressing,.edit-save:active{opacity:1;}
+      #edit-block-host .dish{margin-top:0;}
       /* ---------- footer ---------- */
       footer{margin-top:34px;border-top:1px solid var(--line);padding-top:10px;}
       details summary{cursor:pointer;font-size:13px;color:var(--sub);padding:6px 0;list-style:none;}
@@ -649,6 +662,8 @@
       .auth-login{width:100%;border:1px solid var(--line);background:var(--card);color:var(--ink);font-family:inherit;font-size:15px;font-weight:700;padding:13px;border-radius:12px;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;gap:10px;}
       .auth-login svg{width:19px;height:19px;flex:0 0 auto;display:block;}
       .auth-msg{color:var(--danger);font-size:13px;min-height:1.2em;margin-top:12px;line-height:1.5;}
+      #login-retry{margin-top:10px;}
+      #login-retry[hidden]{display:none !important;}
       .upload-status{font-size:12px;color:var(--sub);margin-top:8px;}
       .upload-status[hidden]{display:none !important;}
       .set-block{margin-top:18px;text-align:left;}
@@ -674,6 +689,7 @@
             Googleでログイン
           </button>
           <div class="auth-msg" id="auth-msg"></div>
+          <button type="button" class="auth-login" id="login-retry" hidden>もう一度試す</button>
         </div>
         <div id="auth-denied" hidden>
           <div class="auth-title" style="font-size:21px;">アクセス権がありません</div>
@@ -920,6 +936,17 @@
         </div>
       </div>
     </div>
+    <div class="sheet-backdrop" id="edit-sheet" hidden>
+      <div class="sheet" role="dialog" aria-label="料理の編集">
+        <div class="sheet-title">料理を編集</div>
+        <div id="edit-block-host"></div>
+        <div class="formmsg" id="edit-msg"></div>
+        <div class="sheet-actions">
+          <button type="button" class="sheet-cancel" id="edit-cancel">キャンセル</button>
+          <button type="button" class="edit-save" id="edit-save">保存する</button>
+        </div>
+      </div>
+    </div>
     <div class="toast" id="toast">保存したよ</div>
     <datalist id="dish-names"></datalist>
 
@@ -1130,9 +1157,6 @@
       }
       try{ firebase.initializeApp(firebaseConfig); }catch(e){}
       fsAuth = firebase.auth();
-      fsAuth.getRedirectResult().catch(function(){
-        if(msg) msg.textContent = 'ログインに失敗したよ。もう一度試してね';
-      });
       fsAuth.onAuthStateChanged(function(user){
         currentUser = user || null;
         var gate = document.getElementById('auth-gate');
@@ -1327,8 +1351,8 @@
       d.images.sort(function(a,b){ return (a.type === 'own' ? 0 : 1) - (b.type === 'own' ? 0 : 1); });
     }
 
-    function addDishBlock(prefill){
-      var container = document.getElementById('dish-blocks');
+    function addDishBlock(prefill, containerEl){
+      var container = containerEl || document.getElementById('dish-blocks');
       var defaultKind = container.children.length === 0 ? '主菜' : '副菜';
       var d = prefill || dish(defaultKind,'','','', '', []);
       var block = document.createElement('div');
@@ -2380,6 +2404,7 @@
         '<div class="upload-status" id="detail-upload-status" hidden></div></div>' +
         '<div class="detail-meta">' + statsLine + (inP ? ' ・ 今日作るものに入ってるよ' : '') + link + '</div>' +
         chips +
+        '<div class="detail-edit-row"><button type="button" class="detail-edit-btn" id="detail-edit-btn">編集</button></div>' +
         '<div class="detail-sec">献立履歴</div>' +
         (histHTML || '<div class="empty">まだ記録がないよ</div>');
       bindCarousels(document.getElementById('detail-body'));
@@ -2390,6 +2415,8 @@
           detailPhotoInput.value = '';
         });
       }
+      var detailEditBtn = document.getElementById('detail-edit-btn');
+      if(detailEditBtn) detailEditBtn.addEventListener('click', openDishEdit);
       document.getElementById('detail-body').querySelectorAll('[data-del-entry]').forEach(function(btn){
         btn.addEventListener('click', function(){
           var block = btn.closest ? btn.closest('.meal-block') : null;
@@ -2425,6 +2452,68 @@
       syncFab();
     }
     document.getElementById('detail-back').addEventListener('click', closeDetail);
+
+    /* ================= 料理の編集（詳細画面） ================= */
+    /* 編集対象は詳細の表示元＝直近の記録の料理データ。作業コピーで編集し、
+       保存した時だけ元の料理データへ反映する（キャンセルで破棄）。 */
+    var editBlock = null;
+    function openDishEdit(){
+      if(!detailName) return;
+      var latest = recipeDetailInfo(detailName).latest;
+      if(!latest) return;
+      var work = {
+        id: latest.id,
+        kind: latest.kind,
+        name: latest.name,
+        ingredients: (latest.ingredients || []).slice(),
+        seasoning: seasoningsArray(latest.seasoning),
+        url: latest.url || '',
+        images: (latest.images || []).slice(),
+        preview: latest.preview || null
+      };
+      var host = document.getElementById('edit-block-host');
+      host.innerHTML = '';
+      document.getElementById('edit-msg').textContent = '';
+      editBlock = addDishBlock(work, host);
+      /* 編集側では料理ブロックの削除ボタンと写真追加は使わない（写真は削除のみ） */
+      var delBtn = editBlock.querySelector('.dish-del');
+      if(delBtn) delBtn.style.display = 'none';
+      var photoBtn = editBlock.querySelector('.photobtn');
+      if(photoBtn) photoBtn.style.display = 'none';
+      document.getElementById('edit-sheet').hidden = false;
+    }
+    function closeDishEdit(){
+      editBlock = null;
+      document.getElementById('edit-sheet').hidden = true;
+    }
+    function saveDishEdit(){
+      if(!editBlock || !detailName) return;
+      var d = editBlock._dish;
+      var nameVal = editBlock.querySelector('.dish-name').value.trim();
+      if(!nameVal){ document.getElementById('edit-msg').textContent = '料理名を入れてね'; return; }
+      d.name = nameVal;
+      d.url = editBlock.querySelector('input[type="url"]').value.trim();
+      maybeRecipeImage(editBlock);
+      var target = recipeDetailInfo(detailName).latest;
+      if(!target){ closeDishEdit(); return; }
+      target.kind = d.kind;
+      target.name = d.name;
+      target.ingredients = d.ingredients.slice();
+      target.seasoning = seasoningsArray(d.seasoning);
+      target.url = d.url;
+      target.images = d.images.slice();
+      if(d.preview) target.preview = d.preview;
+      persist();
+      refreshDatalist();
+      renderAll();
+      closeDishEdit();
+      openDetail(d.name);
+      showToast('保存したよ');
+    }
+    document.getElementById('edit-cancel').addEventListener('click', closeDishEdit);
+    document.getElementById('edit-save').addEventListener('click', saveDishEdit);
+    var editSheetEl = document.getElementById('edit-sheet');
+    editSheetEl.addEventListener('click', function(ev){ if(ev.target === editSheetEl) closeDishEdit(); });
     document.getElementById('detail-fav').addEventListener('click', function(){
       if(!detailName) return;
       if(isFav(detailName)){
@@ -2647,17 +2736,20 @@
     (function(){
       var msg = document.getElementById('auth-msg');
       function doLogin(){
+        var retry = document.getElementById('login-retry');
         if(!fsAuth){ if(msg) msg.textContent = 'まだ準備中だよ。少し待って再読み込みしてね'; return; }
         if(msg) msg.textContent = '';
+        if(retry) retry.hidden = true;
         var provider = new firebase.auth.GoogleAuthProvider();
+        /* リダイレクト方式はストレージ分離環境で「missing initial state」エラーに
+           なるため使わず、ポップアップ方式一本にする */
         fsAuth.signInWithPopup(provider).catch(function(err){
           if(err && err.code === 'auth/popup-closed-by-user'){
             if(msg) msg.textContent = 'ログインがキャンセルされたよ';
             return;
           }
-          fsAuth.signInWithRedirect(provider).catch(function(){
-            if(msg) msg.textContent = 'ログインに失敗したよ。もう一度試してね';
-          });
+          if(msg) msg.textContent = 'ログインできませんでした。ポップアップがブロックされている場合は許可してから、もう一度試してね。うまくいかない時は、Safariでこのページを開いてログインしてみてね';
+          if(retry) retry.hidden = false;
         });
       }
       function doLogout(){
@@ -2665,6 +2757,7 @@
         closeSettings();
       }
       document.getElementById('login-btn').addEventListener('click', doLogin);
+      document.getElementById('login-retry').addEventListener('click', doLogin);
       document.getElementById('denied-logout').addEventListener('click', doLogout);
       document.getElementById('logout-btn').addEventListener('click', doLogout);
 
